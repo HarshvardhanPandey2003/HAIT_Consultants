@@ -1,0 +1,33 @@
+ npm install prisma@6.18.0 @prisma/client@6.18.0
+npx prisma generate
+npx prisma db pull
+# Push schema changes to database
+npx prisma db push
+
+# Regenerate Prisma Client
+npx prisma generate
+
+
+
+SQL Commands :
+TRUNCATE TABLE "table_name";
+\dt  
+select * from "Enquiry";
+
+DELETE FROM "Enquiry"
+WHERE "enquiryId" = 'HAIT_14';
+
+
+-- 1. Clean up old sequence (you already did this)
+DROP SEQUENCE IF EXISTS enquiry_id_seq;
+
+-- 2. Create the sequence
+CREATE SEQUENCE enquiry_id_seq START 1;
+
+-- 3. Add the column (This is the query you needed)
+ALTER TABLE "Enquiry"
+ADD COLUMN "Enquiry ID" TEXT;
+
+-- 4. Set the default value to the custom auto-incrementing format
+ALTER TABLE "Enquiry"
+ALTER COLUMN "Enquiry ID" SET DEFAULT 'HAIT_' || nextval('enquiry_id_seq');

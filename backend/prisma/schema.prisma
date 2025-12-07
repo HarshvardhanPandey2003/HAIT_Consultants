@@ -1,0 +1,78 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Enquiry {
+  // MANDATORY FIELDS (Only 3)
+  enquiryId       String    @id @map("enquiryId")
+  topicName       String
+  spoc            String
+  
+  // ALL OTHER FIELDS ARE OPTIONAL
+  technology      String?
+  partnerName     String?
+  vendorName      String?
+  customerName    String?
+  
+  solutionType    String?
+  perHourRate     Int?
+  hoursDelivery   Int?
+  
+  enquiryDate     DateTime?
+  startDate       DateTime?
+  endDate         DateTime?
+  
+  location        String?
+  status          String?
+  remarks         String?
+  learning        String?
+  
+  // Session Timing Fields (Optional)
+  sessionStartTime  String?
+  sessionEndTime    String?
+  
+  // Days Configuration (Optional)
+  daysType          String?
+  customDays        String?
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  // Relation to scheduled sessions
+  scheduledSessions ScheduledSession[]
+  
+  @@index([status])
+  @@index([enquiryDate])
+}
+
+// Scheduled Session Model
+model ScheduledSession {
+  id                Int       @id @default(autoincrement())
+  
+  // Link to Enquiry
+  enquiryId         String
+  enquiry           Enquiry   @relation(fields: [enquiryId], references: [enquiryId], onDelete: Cascade)
+  
+  // Actual session details
+  sessionDate       DateTime
+  sessionStartTime  String
+  sessionEndTime    String
+  
+  // Session tracking
+  isCompleted       Boolean   @default(false)
+  notes             String?
+  
+  // Metadata
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  // Indexes
+  @@index([sessionDate])
+  @@index([enquiryId])
+  @@unique([enquiryId, sessionDate, sessionStartTime])
+}
