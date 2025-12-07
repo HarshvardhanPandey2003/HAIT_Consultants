@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 
 interface ConflictDetail {
     date: string;
+    displayDate?: string;
     sessionId: number;
     enquiryId: string;
     topicName: string;
@@ -13,6 +14,10 @@ interface ConflictDetail {
     status: string;
     existingTime: string;
     requestedTime: string;
+    existingTimeIST?: string;
+    requestedTimeIST?: string;
+    displayTimezone?: string;
+    dateChanged?: boolean;
     isCompleted: boolean;
 }
 
@@ -39,6 +44,12 @@ interface AvailabilityResponse {
     busyDates: BusyDate[];
     conflicts?: ConflictDetail[];
     message: string;
+    timezone?: string;
+    timezoneInfo?: {
+        displayTimezone: string;
+        storageTimezone: string;
+        note: string;
+    };
 }
 
 const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -181,7 +192,7 @@ export default function AvailabilityPage() {
                             ))}
                         </select>
                         <p className="text-slate-400 text-xs mt-2">
-                            ℹ️ Times will be converted to IST for comparison with existing schedules
+                            ℹ️ Enter times in your timezone - they'll be converted to IST for comparison
                         </p>
                     </div>
 
@@ -313,7 +324,7 @@ export default function AvailabilityPage() {
                     </button>
                 </div>
 
-                {/* Results (keeping your existing results display code) */}
+                {/* Results */}
                 {result && (
                     <div className="space-y-6">
                         {/* Summary Card */}
@@ -350,6 +361,25 @@ export default function AvailabilityPage() {
                                 </div>
                             </div>
                         </div>
+
+                        {/* Timezone Info Banner */}
+                        {result && selectedTimezone !== 'Asia/Kolkata' && (
+                            <div className="bg-purple-500/10 border border-purple-500/30 rounded-xl p-4">
+                                <div className="flex items-center space-x-3">
+                                    <div className="w-10 h-10 bg-purple-500/20 rounded-lg flex items-center justify-center">
+                                        <span className="text-xl">🌍</span>
+                                    </div>
+                                    <div className="flex-1">
+                                        <p className="text-purple-300 font-semibold">
+                                            Times displayed in {getTimezoneLabel()}
+                                        </p>
+                                        <p className="text-purple-400/70 text-sm">
+                                            All times shown are converted from IST storage for your convenience
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
 
                         {/* Available Dates */}
                         {result.availableDates.length > 0 && (
@@ -402,13 +432,35 @@ export default function AvailabilityPage() {
                                                                     <p className="text-slate-400 text-sm">Client: {conflict.customerName}</p>
                                                                 )}
                                                             </div>
-                                                            <div className="text-right">
-                                                                <p className="text-red-400 font-mono text-sm">{conflict.existingTime}</p>
+                                                            <div className="text-right ml-4">
+                                                                <div className="mb-2">
+                                                                    <p className="text-xs text-slate-500 mb-1">Existing Session</p>
+                                                                    <p className="text-red-400 font-mono text-sm">{conflict.existingTime}</p>
+                                                                </div>
+                                                                <div>
+                                                                    <p className="text-xs text-slate-500 mb-1">Your Request</p>
+                                                                    <p className="text-yellow-400 font-mono text-sm">{conflict.requestedTime}</p>
+                                                                </div>
+                                                                {conflict.dateChanged && (
+                                                                    <span className="text-xs text-purple-400 mt-2 block">
+                                                                        ℹ️ Date adjusted for timezone
+                                                                    </span>
+                                                                )}
                                                                 {conflict.isCompleted && (
-                                                                    <span className="text-xs text-emerald-400">✓ Completed</span>
+                                                                    <span className="text-xs text-emerald-400 mt-1 block">✓ Completed</span>
                                                                 )}
                                                             </div>
                                                         </div>
+                                                        {/* Show IST times for reference */}
+                                                        {selectedTimezone !== 'Asia/Kolkata' && conflict.existingTimeIST && (
+                                                            <div className="mt-3 pt-3 border-t border-slate-700/50">
+                                                                <p className="text-xs text-slate-500 mb-1">IST Reference:</p>
+                                                                <div className="flex items-center justify-between text-xs text-slate-400">
+                                                                    <span>Existing: {conflict.existingTimeIST}</span>
+                                                                    <span>Requested: {conflict.requestedTimeIST}</span>
+                                                                </div>
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 ))}
                                             </div>
