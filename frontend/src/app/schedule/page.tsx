@@ -11,6 +11,12 @@ interface Session {
     sessionEndTime: string;
     isCompleted: boolean;
     notes: string | null;
+    timezone?: string;
+    displayTimezone?: string;
+    dateChanged?: boolean;
+    originalSessionDate?: string;
+    originalSessionStartTime?: string;
+    originalSessionEndTime?: string;
     enquiry: {
         enquiryId: string;
         topicName: string;
@@ -19,6 +25,12 @@ interface Session {
         location: string;
         status: string;
     };
+}
+
+interface Timezone {
+    label: string;
+    value: string;
+    offset: string;
 }
 
 interface GroupedSessions {
@@ -33,26 +45,49 @@ export default function SchedulePage() {
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState<string>('all');
     const [selectedMonth, setSelectedMonth] = useState<string>('');
+    const [selectedTimezone, setSelectedTimezone] = useState<string>('Asia/Kolkata');
+    const [availableTimezones, setAvailableTimezones] = useState<Timezone[]>([]);
+    const [timezoneLoading, setTimezoneLoading] = useState(false);
+
+    useEffect(() => {
+        fetchTimezones();
+    }, []);
 
     useEffect(() => {
         fetchSessions();
-    }, [filter]);
+    }, [filter, selectedTimezone]);
+
+    const fetchTimezones = async () => {
+        try {
+            const response = await fetch('http://localhost:5000/api/schedule/timezones');
+            const data = await response.json();
+            setAvailableTimezones(data.supported);
+        } catch (error) {
+            console.error('Failed to fetch timezones:', error);
+            // Fallback to default
+            setAvailableTimezones([
+                { label: 'IST - India (UTC+5:30)', value: 'Asia/Kolkata', offset: '+05:30' }
+            ]);
+        }
+    };
 
     const fetchSessions = async () => {
+        setTimezoneLoading(true);
         try {
-            let url = 'http://localhost:5000/api/schedule';
+            let url = `http://localhost:5000/api/schedule?timezone=${selectedTimezone}`;
 
             if (filter === 'upcoming') {
-                url += '?upcoming=true';
+                url += '&upcoming=true';
             }
 
             const response = await fetch(url);
             const data = await response.json();
-            setSessions(data);
+            setSessions(data.sessions || data);
         } catch (error) {
             console.error('Failed to fetch schedule:', error);
         } finally {
             setLoading(false);
+            setTimezoneLoading(false);
         }
     };
 
@@ -111,11 +146,9 @@ export default function SchedulePage() {
     };
 
     const format24Hour = (time: string) => {
-        // If time is already in HH:MM format (24-hour), return as-is
         if (/^\d{2}:\d{2}$/.test(time)) {
             return time;
         }
-        // Otherwise, ensure it's formatted properly
         return time;
     };
 
@@ -126,6 +159,11 @@ export default function SchedulePage() {
             case 'Lost': return 'text-red-400';
             default: return 'text-slate-400';
         }
+    };
+
+    const getTimezoneLabel = () => {
+        const tz = availableTimezones.find(t => t.value === selectedTimezone);
+        return tz ? tz.label.split(' - ')[0] : 'IST';
     };
 
     const filteredGrouped = selectedMonth
@@ -193,6 +231,54 @@ export default function SchedulePage() {
                                 <span className="text-sm">Manage Enquiries</span>
                             </button>
                         </div>
+                    </div>
+                </div>
+
+                {/* Timezone Selector */}
+                <div className="bg-slate-800/40 backdrop-blur-xl border border-slate-700/50 rounded-xl p-4 mb-6">
+                    <div className="flex flex-col lg:flex-row lg:items-center gap-4">
+                        <div className="flex items-center space-x-3">
+                            <div className="w-10 h-10 bg-cyan-500/20 rounded-lg flex items-center justify-center">
+                                <span className="text-xl">🌍</span>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-300">
+                                    Display Timezone
+                                </label>
+                                <p className="text-xs text-slate-500">Times stored in IST, displayed in selected timezone</p>
+                            </div>
+                        </div>
+                        
+                        <div className="flex-1 lg:max-w-md">
+                            <select
+                                value={selectedTimezone}
+                                onChange={(e) => setSelectedTimezone(e.target.value)}
+                                disabled={timezoneLoading}
+                                className="w-full px-4 py-2.5 bg-slate-900/50 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {availableTimezones.map((tz) => (
+                                    <option key={tz.value} value={tz.value}>
+                                        {tz.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {timezoneLoading && (
+                            <div className="flex items-center space-x-2 text-cyan-400">
+                                <div className="w-4 h-4 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin"></div>
+                                <span className="text-sm">Converting...</span>
+                            </div>
+                        )}
+
+                        {selectedTimezone !== 'Asia/Kolkata' && !timezoneLoading && (
+                            <div className="flex items-center space-x-2 text-yellow-400 text-sm">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <span>Viewing in {getTimezoneLabel()}</span>
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -338,6 +424,11 @@ export default function SchedulePage() {
                                                                     <span className="text-cyan-400 font-bold text-lg">
                                                                         {format24Hour(session.sessionEndTime)}
                                                                     </span>
+                                                                    {session.dateChanged && (
+                                                                        <span className="text-yellow-400 text-[10px] mt-1">
+                                                                            ⚠️ Date adjusted
+                                                                        </span>
+                                                                    )}
                                                                 </div>
 
                                                                 <div className="flex-1">
@@ -368,6 +459,18 @@ export default function SchedulePage() {
                                                                             {session.enquiry.status}
                                                                         </span>
                                                                     </div>
+                                                                    {/* Show original IST time if timezone is different */}
+                                                                    {selectedTimezone !== 'Asia/Kolkata' && session.originalSessionStartTime && (
+                                                                        <div className="mt-2 text-xs text-slate-500 flex items-center space-x-2">
+                                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                                            </svg>
+                                                                            <span>
+                                                                                IST: {session.originalSessionStartTime} - {session.originalSessionEndTime}
+                                                                                {session.originalSessionDate !== date && ` on ${formatDate(session.originalSessionDate!)}`}
+                                                                            </span>
+                                                                        </div>
+                                                                    )}
                                                                     {session.notes && (
                                                                         <p className="text-slate-400 text-sm mt-2 italic">
                                                                             📝 {session.notes}

@@ -43,6 +43,18 @@ interface AvailabilityResponse {
 
 const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+// Timezone options with proper IANA names
+const timezones = [
+    { label: 'IST - India (UTC+5:30)', value: 'Asia/Kolkata', offset: '+05:30' },
+    { label: 'GST - UAE/Oman (UTC+4:00)', value: 'Asia/Dubai', offset: '+04:00' },
+    { label: 'PST - Pacific (UTC-8:00)', value: 'America/Los_Angeles', offset: '-08:00' },
+    { label: 'EST - Eastern (UTC-5:00)', value: 'America/New_York', offset: '-05:00' },
+    { label: 'GMT - London (UTC+0:00)', value: 'Europe/London', offset: '+00:00' },
+    { label: 'CET - Central Europe (UTC+1:00)', value: 'Europe/Paris', offset: '+01:00' },
+    { label: 'JST - Japan (UTC+9:00)', value: 'Asia/Tokyo', offset: '+09:00' },
+    { label: 'AEST - Australia East (UTC+10:00)', value: 'Australia/Sydney', offset: '+10:00' },
+];
+
 export default function AvailabilityPage() {
     const router = useRouter();
     const [loading, setLoading] = useState(false);
@@ -53,6 +65,7 @@ export default function AvailabilityPage() {
     const [endDate, setEndDate] = useState('');
     const [sessionStartTime, setSessionStartTime] = useState('');
     const [sessionEndTime, setSessionEndTime] = useState('');
+    const [selectedTimezone, setSelectedTimezone] = useState('Asia/Kolkata'); // Default to IST
     const [daysType, setDaysType] = useState<'Weekdays' | 'Weekends' | 'Custom'>('Weekdays');
     const [customDays, setCustomDays] = useState<string[]>([]);
 
@@ -62,9 +75,20 @@ export default function AvailabilityPage() {
         );
     };
 
+    // Convert time display based on selected timezone
+    const getTimezoneLabel = () => {
+        const tz = timezones.find(t => t.value === selectedTimezone);
+        return tz ? tz.label.split(' - ')[0] : 'IST';
+    };
+
     const handleCheckAvailability = async () => {
         if (!startDate || !endDate || !sessionStartTime || !sessionEndTime) {
             alert('Please fill in all required fields');
+            return;
+        }
+
+        if (daysType === 'Custom' && customDays.length === 0) {
+            alert('Please select at least one day for custom pattern');
             return;
         }
 
@@ -80,6 +104,7 @@ export default function AvailabilityPage() {
                     endDate,
                     sessionStartTime,
                     sessionEndTime,
+                    timezone: selectedTimezone, // Send selected timezone
                     daysType,
                     customDays: daysType === 'Custom' ? customDays : null
                 })
@@ -108,15 +133,6 @@ export default function AvailabilityPage() {
             day: 'numeric',
             year: 'numeric'
         });
-    };
-
-    const format24Hour = (time: string) => {
-        // If time is already in HH:MM format (24-hour), return as-is
-        if (/^\d{2}:\d{2}$/.test(time)) {
-            return time;
-        }
-        // Otherwise, ensure it's formatted properly
-        return time;
     };
 
     return (
@@ -148,6 +164,27 @@ export default function AvailabilityPage() {
                 <div className="bg-slate-800/40 backdrop-blur-xl border border-slate-700/50 rounded-xl p-6 mb-6">
                     <h2 className="text-lg font-bold text-white mb-4">📅 Enter Details</h2>
 
+                    {/* Timezone Selector */}
+                    <div className="mb-6 p-4 bg-slate-900/50 border border-cyan-500/30 rounded-lg">
+                        <label className="block text-sm font-medium text-cyan-400 mb-2">
+                            🌍 Select Your Timezone <span className="text-red-400">*</span>
+                        </label>
+                        <select
+                            value={selectedTimezone}
+                            onChange={(e) => setSelectedTimezone(e.target.value)}
+                            className="w-full px-4 py-2.5 bg-slate-900/50 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        >
+                            {timezones.map((tz) => (
+                                <option key={tz.value} value={tz.value}>
+                                    {tz.label}
+                                </option>
+                            ))}
+                        </select>
+                        <p className="text-slate-400 text-xs mt-2">
+                            ℹ️ Times will be converted to IST for comparison with existing schedules
+                        </p>
+                    </div>
+
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         {/* Date Range */}
                         <div>
@@ -177,7 +214,7 @@ export default function AvailabilityPage() {
                         {/* Time Range */}
                         <div>
                             <label className="block text-sm font-medium text-slate-300 mb-2">
-                                Session Start Time <span className="text-red-400">*</span>
+                                Session Start Time ({getTimezoneLabel()}) <span className="text-red-400">*</span>
                             </label>
                             <input
                                 type="time"
@@ -189,7 +226,7 @@ export default function AvailabilityPage() {
 
                         <div>
                             <label className="block text-sm font-medium text-slate-300 mb-2">
-                                Session End Time <span className="text-red-400">*</span>
+                                Session End Time ({getTimezoneLabel()}) <span className="text-red-400">*</span>
                             </label>
                             <input
                                 type="time"
@@ -276,7 +313,7 @@ export default function AvailabilityPage() {
                     </button>
                 </div>
 
-                {/* Results */}
+                {/* Results (keeping your existing results display code) */}
                 {result && (
                     <div className="space-y-6">
                         {/* Summary Card */}

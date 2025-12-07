@@ -2,13 +2,114 @@ const express = require('express');
 const router = express.Router();
 const { PrismaClient } = require('@prisma/client');
 const { generateSessionDates, checkConflicts } = require('../utils/scheduleGenerator');
+const { 
+    convertSessionsTimezone, 
+    isValidTimezone, 
+    DEFAULT_TIMEZONE,
+    SUPPORTED_TIMEZONES 
+} = require('../utils/timezoneConverter');
 
 const prisma = new PrismaClient();
 
-// GET all scheduled sessions (with optional filters)
+// ⚠️ IMPORTANT: Define specific routes BEFORE parametrized routes
+// GET - List of supported timezones (MUST BE FIRST)
+router.get('/timezones', (req, res) => {
+    res.json({
+        default: DEFAULT_TIMEZONE,
+        supported: SUPPORTED_TIMEZONES
+    });
+});
+
+// GET - Statistics for an enquiry
+router.get('/stats/:enquiryId', async (req, res) => {
+    try {
+        const { enquiryId } = req.params;
+
+        const totalSessions = await prisma.scheduledSession.count({
+            where: { enquiryId }
+        });
+
+        const completedSessions = await prisma.scheduledSession.count({
+            where: {
+                enquiryId,
+                isCompleted: true
+            }
+        });
+
+        const upcomingSessions = await prisma.scheduledSession.count({
+            where: {
+                enquiryId,
+                sessionDate: { gte: new Date() },
+                isCompleted: false
+            }
+        });
+
+        res.json({
+            total: totalSessions,
+            completed: completedSessions,
+            upcoming: upcomingSessions,
+            remaining: totalSessions - completedSessions
+        });
+
+    } catch (error) {
+        console.error('Error fetching stats:', error);
+        res.status(500).json({ error: 'Failed to fetch statistics' });
+    }
+});
+
+// GET sessions for a specific date (with timezone support)
+router.get('/date/:date', async (req, res) => {
+    try {
+        const { timezone = DEFAULT_TIMEZONE } = req.query;
+        const targetDate = new Date(req.params.date);
+
+        // Validate timezone
+        if (timezone && !isValidTimezone(timezone)) {
+            return res.status(400).json({ 
+                error: 'Invalid timezone',
+                supportedTimezones: SUPPORTED_TIMEZONES 
+            });
+        }
+
+        const sessions = await prisma.scheduledSession.findMany({
+            where: {
+                sessionDate: targetDate
+            },
+            include: {
+                enquiry: true
+            },
+            orderBy: {
+                sessionStartTime: 'asc'
+            }
+        });
+
+        // Convert to requested timezone
+        const convertedSessions = convertSessionsTimezone(sessions, timezone);
+
+        res.json({
+            date: req.params.date,
+            timezone,
+            count: convertedSessions.length,
+            sessions: convertedSessions
+        });
+    } catch (error) {
+        console.error('Error fetching sessions for date:', error);
+        res.status(500).json({ error: 'Failed to fetch sessions' });
+    }
+});
+
+// GET all scheduled sessions (with optional filters and timezone)
 router.get('/', async (req, res) => {
     try {
-        const { month, year, enquiryId, upcoming } = req.query;
+        const { month, year, enquiryId, upcoming, timezone = DEFAULT_TIMEZONE } = req.query;
+
+        // Validate timezone
+        if (timezone && !isValidTimezone(timezone)) {
+            return res.status(400).json({ 
+                error: 'Invalid timezone',
+                supportedTimezones: SUPPORTED_TIMEZONES 
+            });
+        }
 
         let whereClause = {};
 
@@ -17,7 +118,7 @@ router.get('/', async (req, res) => {
             whereClause.enquiryId = enquiryId;
         }
 
-        // Filter by month/year
+        // Filter by month/year (in IST, as stored)
         if (month && year) {
             const startOfMonth = new Date(year, month - 1, 1);
             const endOfMonth = new Date(year, month, 0, 23, 59, 59);
@@ -55,34 +156,175 @@ router.get('/', async (req, res) => {
             ]
         });
 
-        res.json(sessions);
+        // Convert to requested timezone
+        const convertedSessions = convertSessionsTimezone(sessions, timezone);
+
+        res.json({
+            timezone,
+            displayTimezone: timezone === DEFAULT_TIMEZONE ? 'IST - India (UTC+5:30)' : null,
+            count: convertedSessions.length,
+            sessions: convertedSessions
+        });
     } catch (error) {
         console.error('Error fetching schedule:', error);
         res.status(500).json({ error: 'Failed to fetch schedule' });
     }
 });
 
-// GET sessions for a specific date
-router.get('/date/:date', async (req, res) => {
+// POST - Backfill existing enquiries
+router.post('/backfill', async (req, res) => {
     try {
-        const targetDate = new Date(req.params.date);
+        console.log('🔄 Starting schedule backfill for existing enquiries...');
 
-        const sessions = await prisma.scheduledSession.findMany({
+        const enquiries = await prisma.enquiry.findMany({
             where: {
-                sessionDate: targetDate
+                status: {
+                    in: ['Confirmed', 'Delivered']
+                }
             },
             include: {
-                enquiry: true
-            },
-            orderBy: {
-                sessionStartTime: 'asc'
+                scheduledSessions: true
             }
         });
 
-        res.json(sessions);
+        console.log(`📋 Found ${enquiries.length} Confirmed/Delivered enquiries`);
+
+        const results = {
+            total: enquiries.length,
+            processed: 0,
+            skipped: 0,
+            failed: 0,
+            details: []
+        };
+
+        for (const enquiry of enquiries) {
+            const hasExistingSessions = enquiry.scheduledSessions.length > 0;
+            const forceRegenerate = req.body.force === true;
+
+            if (hasExistingSessions && !forceRegenerate) {
+                console.log(`⏭️  Skipping ${enquiry.enquiryId} - already has ${enquiry.scheduledSessions.length} sessions`);
+                results.skipped++;
+                results.details.push({
+                    enquiryId: enquiry.enquiryId,
+                    status: 'skipped',
+                    reason: 'Already has sessions (use force=true to regenerate)',
+                    existingSessions: enquiry.scheduledSessions.length
+                });
+                continue;
+            }
+
+            const missingFields = [];
+            if (!enquiry.startDate) missingFields.push('startDate');
+            if (!enquiry.endDate) missingFields.push('endDate');
+            if (!enquiry.sessionStartTime) missingFields.push('sessionStartTime');
+            if (!enquiry.sessionEndTime) missingFields.push('sessionEndTime');
+            if (!enquiry.daysType) missingFields.push('daysType');
+
+            if (missingFields.length > 0) {
+                console.warn(`⚠️  Skipping ${enquiry.enquiryId} - missing fields: ${missingFields.join(', ')}`);
+                results.skipped++;
+                results.details.push({
+                    enquiryId: enquiry.enquiryId,
+                    status: 'skipped',
+                    reason: 'Missing required fields',
+                    missingFields
+                });
+                continue;
+            }
+
+            try {
+                console.log(`🚀 Generating schedule for ${enquiry.enquiryId} (${enquiry.status})...`);
+
+                let customDaysArray = null;
+                if (enquiry.daysType === 'Custom' && enquiry.customDays) {
+                    customDaysArray = JSON.parse(enquiry.customDays);
+                }
+
+                const sessionDates = generateSessionDates(
+                    enquiry.startDate,
+                    enquiry.endDate,
+                    enquiry.daysType,
+                    customDaysArray
+                );
+
+                if (sessionDates.length === 0) {
+                    console.warn(`⚠️  No valid dates for ${enquiry.enquiryId}`);
+                    results.skipped++;
+                    results.details.push({
+                        enquiryId: enquiry.enquiryId,
+                        status: 'skipped',
+                        reason: 'No valid session dates generated'
+                    });
+                    continue;
+                }
+
+                if (hasExistingSessions) {
+                    const deleteResult = await prisma.scheduledSession.deleteMany({
+                        where: { enquiryId: enquiry.enquiryId }
+                    });
+                    console.log(`🗑️  Deleted ${deleteResult.count} existing sessions for ${enquiry.enquiryId}`);
+                }
+
+                const isDelivered = enquiry.status === 'Delivered';
+                const sessionsToCreate = sessionDates.map(date => ({
+                    enquiryId: enquiry.enquiryId,
+                    sessionDate: new Date(date),
+                    sessionStartTime: enquiry.sessionStartTime,
+                    sessionEndTime: enquiry.sessionEndTime,
+                    isCompleted: isDelivered
+                }));
+
+                const createResult = await prisma.scheduledSession.createMany({
+                    data: sessionsToCreate,
+                    skipDuplicates: true
+                });
+
+                console.log(`✅ Created ${createResult.count} sessions for ${enquiry.enquiryId}${isDelivered ? ' (all marked completed)' : ''}`);
+
+                results.processed++;
+                results.details.push({
+                    enquiryId: enquiry.enquiryId,
+                    status: 'success',
+                    enquiryStatus: enquiry.status,
+                    sessionsCreated: createResult.count,
+                    allCompleted: isDelivered
+                });
+
+            } catch (error) {
+                console.error(`❌ Failed to generate schedule for ${enquiry.enquiryId}:`, error.message);
+                results.failed++;
+                results.details.push({
+                    enquiryId: enquiry.enquiryId,
+                    status: 'failed',
+                    error: error.message
+                });
+            }
+        }
+
+        console.log('✅ Backfill completed:', {
+            total: results.total,
+            processed: results.processed,
+            skipped: results.skipped,
+            failed: results.failed
+        });
+
+        res.json({
+            message: 'Schedule backfill completed',
+            summary: {
+                totalEnquiries: results.total,
+                processed: results.processed,
+                skipped: results.skipped,
+                failed: results.failed
+            },
+            details: results.details
+        });
+
     } catch (error) {
-        console.error('Error fetching sessions for date:', error);
-        res.status(500).json({ error: 'Failed to fetch sessions' });
+        console.error('❌ Backfill error:', error);
+        res.status(500).json({ 
+            error: 'Backfill failed', 
+            message: error.message 
+        });
     }
 });
 
@@ -160,7 +402,7 @@ router.post('/generate/:enquiryId', async (req, res) => {
             where: { enquiryId }
         });
 
-        // Create new sessions
+        // Create new sessions (always stored in IST)
         const sessionsToCreate = sessionDates.map(date => ({
             enquiryId: enquiry.enquiryId,
             sessionDate: date,
@@ -176,6 +418,7 @@ router.post('/generate/:enquiryId', async (req, res) => {
         res.status(201).json({
             message: 'Schedule generated successfully',
             sessionsCreated: createdSessions.count,
+            timezone: 'IST (stored)',
             conflicts: conflicts.length > 0 ? conflicts : undefined
         });
 
@@ -267,205 +510,6 @@ router.delete('/enquiry/:enquiryId', async (req, res) => {
         console.error('Error deleting sessions:', error);
         res.status(500).json({ error: 'Failed to delete sessions' });
     }
-});
-
-// GET - Statistics for an enquiry
-router.get('/stats/:enquiryId', async (req, res) => {
-    try {
-        const { enquiryId } = req.params;
-
-        const totalSessions = await prisma.scheduledSession.count({
-            where: { enquiryId }
-        });
-
-        const completedSessions = await prisma.scheduledSession.count({
-            where: {
-                enquiryId,
-                isCompleted: true
-            }
-        });
-
-        const upcomingSessions = await prisma.scheduledSession.count({
-            where: {
-                enquiryId,
-                sessionDate: { gte: new Date() },
-                isCompleted: false
-            }
-        });
-
-        res.json({
-            total: totalSessions,
-            completed: completedSessions,
-            upcoming: upcomingSessions,
-            remaining: totalSessions - completedSessions
-        });
-
-    } catch (error) {
-        console.error('Error fetching stats:', error);
-        res.status(500).json({ error: 'Failed to fetch statistics' });
-    }
-});
-router.post('/backfill', async (req, res) => {
-  try {
-    console.log('🔄 Starting schedule backfill for existing enquiries...');
-
-    // Find all Confirmed or Delivered enquiries
-    const enquiries = await prisma.enquiry.findMany({
-      where: {
-        status: {
-          in: ['Confirmed', 'Delivered']
-        }
-      },
-      include: {
-        scheduledSessions: true
-      }
-    });
-
-    console.log(`📋 Found ${enquiries.length} Confirmed/Delivered enquiries`);
-
-    const results = {
-      total: enquiries.length,
-      processed: 0,
-      skipped: 0,
-      failed: 0,
-      details: []
-    };
-
-    for (const enquiry of enquiries) {
-      const hasExistingSessions = enquiry.scheduledSessions.length > 0;
-      const forceRegenerate = req.body.force === true;
-
-      // Skip if already has sessions (unless force flag is set)
-      if (hasExistingSessions && !forceRegenerate) {
-        console.log(`⏭️  Skipping ${enquiry.enquiryId} - already has ${enquiry.scheduledSessions.length} sessions`);
-        results.skipped++;
-        results.details.push({
-          enquiryId: enquiry.enquiryId,
-          status: 'skipped',
-          reason: 'Already has sessions (use force=true to regenerate)',
-          existingSessions: enquiry.scheduledSessions.length
-        });
-        continue;
-      }
-
-      // Validate required fields
-      const missingFields = [];
-      if (!enquiry.startDate) missingFields.push('startDate');
-      if (!enquiry.endDate) missingFields.push('endDate');
-      if (!enquiry.sessionStartTime) missingFields.push('sessionStartTime');
-      if (!enquiry.sessionEndTime) missingFields.push('sessionEndTime');
-      if (!enquiry.daysType) missingFields.push('daysType');
-
-      if (missingFields.length > 0) {
-        console.warn(`⚠️  Skipping ${enquiry.enquiryId} - missing fields: ${missingFields.join(', ')}`);
-        results.skipped++;
-        results.details.push({
-          enquiryId: enquiry.enquiryId,
-          status: 'skipped',
-          reason: 'Missing required fields',
-          missingFields
-        });
-        continue;
-      }
-
-      try {
-        console.log(`🚀 Generating schedule for ${enquiry.enquiryId} (${enquiry.status})...`);
-
-        // Parse customDays
-        let customDaysArray = null;
-        if (enquiry.daysType === 'Custom' && enquiry.customDays) {
-          customDaysArray = JSON.parse(enquiry.customDays);
-        }
-
-        // Generate session dates
-        const sessionDates = generateSessionDates(
-          enquiry.startDate,
-          enquiry.endDate,
-          enquiry.daysType,
-          customDaysArray
-        );
-
-        if (sessionDates.length === 0) {
-          console.warn(`⚠️  No valid dates for ${enquiry.enquiryId}`);
-          results.skipped++;
-          results.details.push({
-            enquiryId: enquiry.enquiryId,
-            status: 'skipped',
-            reason: 'No valid session dates generated'
-          });
-          continue;
-        }
-
-        // Delete existing sessions if force regenerating
-        if (hasExistingSessions) {
-          const deleteResult = await prisma.scheduledSession.deleteMany({
-            where: { enquiryId: enquiry.enquiryId }
-          });
-          console.log(`🗑️  Deleted ${deleteResult.count} existing sessions for ${enquiry.enquiryId}`);
-        }
-
-        // Create new sessions
-        const isDelivered = enquiry.status === 'Delivered';
-        const sessionsToCreate = sessionDates.map(date => ({
-          enquiryId: enquiry.enquiryId,
-          sessionDate: new Date(date),
-          sessionStartTime: enquiry.sessionStartTime,
-          sessionEndTime: enquiry.sessionEndTime,
-          isCompleted: isDelivered // Mark completed if Delivered
-        }));
-
-        const createResult = await prisma.scheduledSession.createMany({
-          data: sessionsToCreate,
-          skipDuplicates: true
-        });
-
-        console.log(`✅ Created ${createResult.count} sessions for ${enquiry.enquiryId}${isDelivered ? ' (all marked completed)' : ''}`);
-
-        results.processed++;
-        results.details.push({
-          enquiryId: enquiry.enquiryId,
-          status: 'success',
-          enquiryStatus: enquiry.status,
-          sessionsCreated: createResult.count,
-          allCompleted: isDelivered
-        });
-
-      } catch (error) {
-        console.error(`❌ Failed to generate schedule for ${enquiry.enquiryId}:`, error.message);
-        results.failed++;
-        results.details.push({
-          enquiryId: enquiry.enquiryId,
-          status: 'failed',
-          error: error.message
-        });
-      }
-    }
-
-    console.log('✅ Backfill completed:', {
-      total: results.total,
-      processed: results.processed,
-      skipped: results.skipped,
-      failed: results.failed
-    });
-
-    res.json({
-      message: 'Schedule backfill completed',
-      summary: {
-        totalEnquiries: results.total,
-        processed: results.processed,
-        skipped: results.skipped,
-        failed: results.failed
-      },
-      details: results.details
-    });
-
-  } catch (error) {
-    console.error('❌ Backfill error:', error);
-    res.status(500).json({ 
-      error: 'Backfill failed', 
-      message: error.message 
-    });
-  }
 });
 
 module.exports = router;
