@@ -225,7 +225,7 @@ export default function AvailabilityPage() {
                         {/* Time Range */}
                         <div>
                             <label className="block text-sm font-medium text-slate-300 mb-2">
-                                Session Start Time ({getTimezoneLabel()}) <span className="text-red-400">*</span>
+                                Session Start Time <span className="text-white">({getTimezoneLabel()})</span> <span className="text-red-400">*</span>
                             </label>
                             <input
                                 type="time"
@@ -237,7 +237,7 @@ export default function AvailabilityPage() {
 
                         <div>
                             <label className="block text-sm font-medium text-slate-300 mb-2">
-                                Session End Time ({getTimezoneLabel()}) <span className="text-red-400">*</span>
+                                Session End Time <span className="text-white">({getTimezoneLabel()})</span> <span className="text-red-400">*</span>
                             </label>
                             <input
                                 type="time"

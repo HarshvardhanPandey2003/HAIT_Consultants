@@ -4,10 +4,11 @@
   "description": "Root script to run frontend and backend simultaneously",
   "private": true,
   "scripts": {
-    "dev": "concurrently \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
+    "dev": "cross-env NODE_NO_WARNINGS=1 concurrently \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
     "install-all": "npm install && npm install --prefix backend && npm install --prefix frontend"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3"
   }
 }

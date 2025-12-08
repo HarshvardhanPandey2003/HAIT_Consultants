@@ -8,71 +8,48 @@ datasource db {
 }
 
 model Enquiry {
-  // MANDATORY FIELDS (Only 3)
-  enquiryId       String    @id @map("enquiryId")
-  topicName       String
-  spoc            String
-  
-  // ALL OTHER FIELDS ARE OPTIONAL
-  technology      String?
-  partnerName     String?
-  vendorName      String?
-  customerName    String?
-  
-  solutionType    String?
-  perHourRate     Int?
-  hoursDelivery   Int?
-  
-  enquiryDate     DateTime?
-  startDate       DateTime?
-  endDate         DateTime?
-  
-  location        String?
-  status          String?
-  remarks         String?
-  learning        String?
-  
-  // Session Timing Fields (Optional)
-  sessionStartTime  String?
-  sessionEndTime    String?
-  
-  // Days Configuration (Optional)
-  daysType          String?
+  topicName         String
+  technology        String?
+  spoc              String
+  partnerName       String?
+  vendorName        String?
+  customerName      String?
+  solutionType      String?
+  perHourRate       Int?
+  hoursDelivery     Int?
+  enquiryDate       DateTime?
+  startDate         DateTime?
+  endDate           DateTime?
+  location          String?
+  status            String?
+  remarks           String?
+  learning          String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  enquiryId         String             @id @map("enquiryId")
   customDays        String?
-  
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  
-  // Relation to scheduled sessions
+  daysType          String?
+  sessionEndTime    String?
+  sessionStartTime  String?
   scheduledSessions ScheduledSession[]
-  
+
   @@index([status])
   @@index([enquiryDate])
 }
 
-// Scheduled Session Model
 model ScheduledSession {
-  id                Int       @id @default(autoincrement())
-  
-  // Link to Enquiry
-  enquiryId         String
-  enquiry           Enquiry   @relation(fields: [enquiryId], references: [enquiryId], onDelete: Cascade)
-  
-  // Actual session details
-  sessionDate       DateTime
-  sessionStartTime  String
-  sessionEndTime    String
-  
-  // Session tracking
-  isCompleted       Boolean   @default(false)
-  notes             String?
-  
-  // Metadata
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
-  
-  // Indexes
+  id               Int      @id @default(autoincrement())
+  enquiryId        String
+  sessionDate      DateTime
+  sessionStartTime String
+  sessionEndTime   String
+  isCompleted      Boolean  @default(false)
+  notes            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  enquiry          Enquiry  @relation(fields: [enquiryId], references: [enquiryId], onDelete: Cascade)
+
+  @@unique([enquiryId, sessionDate, sessionStartTime])
   @@index([sessionDate])
   @@index([enquiryId])
-  @@unique([enquiryId, sessionDate, sessionStartTime])
 }
