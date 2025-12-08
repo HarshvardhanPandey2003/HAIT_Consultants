@@ -1,0 +1,11 @@
+Method 1: Using cURL (Command Line)
+- Basic backfill (skips enquiries that already have sessions):
+bash
+curl -X POST http://localhost:5000/api/schedule/backfill \
+  -H "Content-Type: application/json"
+
+- Force regenerate (deletes existing sessions and regenerates):
+bash
+curl -X POST http://localhost:5000/api/schedule/backfill \
+  -H "Content-Type: application/json" \
+  -d '{"force": true}'

@@ -4,6 +4,7 @@ const { PrismaClient } = require('@prisma/client');
 const { generateSessionDates } = require('../utils/scheduleGenerator');
 
 const prisma = new PrismaClient();
+const { convertToIST, SUPPORTED_TIMEZONES } = require('../utils/timezoneConverter');
 
 // GET all enquiries with optional filters
 router.get('/', async (req, res) => {
@@ -44,6 +45,38 @@ router.get('/', async (req, res) => {
     console.error('Error fetching enquiries:', error);
     res.status(500).json({ error: 'Failed to fetch enquiries' });
   }
+});
+
+router.post('/convert-to-ist', async (req, res) => {
+    try {
+        const { time, date, timezone } = req.body;
+
+        if (!time || !date || !timezone) {
+            return res.status(400).json({
+                error: 'Missing required fields',
+                required: ['time', 'date', 'timezone']
+            });
+        }
+
+        const converted = convertToIST(time, date, timezone);
+
+        res.json({
+            original: {
+                time,
+                date,
+                timezone
+            },
+            converted: {
+                time: converted.time,
+                date: converted.date,
+                timezone: 'Asia/Kolkata',
+                dateChanged: converted.dateChanged
+            }
+        });
+    } catch (error) {
+        console.error('Error converting to IST:', error);
+        res.status(500).json({ error: 'Failed to convert timezone' });
+    }
 });
 
 // GET single enquiry by ID
